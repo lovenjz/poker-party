@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>线下德州扑克助手</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #1a252f; color: #ecf0f1; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    header { background: #2c3e50; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+    .badge { background: #e74c3c; padding: 2px 8px; border-radius: 12px; font-weight: bold; }
+    .table-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; padding: 10px; }
+    .pot-display { font-size: 20px; font-weight: bold; margin-bottom: 12px; color: #f1c40f; }
+    .community-cards { display: flex; gap: 8px; min-height: 70px; align-items: center; }
+    .card { width: 48px; height: 68px; background: white; border-radius: 6px; color: #2c3e50; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 18px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+    .players-list { width: 100%; display: flex; gap: 10px; overflow-x: auto; padding: 8px 16px; background: rgba(0,0,0,0.2); }
+    .player-tag { background: #34495e; padding: 6px 12px; border-radius: 8px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+    .player-tag.active { border: 2px solid #2ecc71; background: #1e8449; }
+    .hand-container { padding: 12px 16px; display: flex; flex-direction: column; align-items: center; }
+    .peek-box { width: 100%; max-width: 320px; height: 90px; background: #2c3e50; border: 2px dashed #7f8c8d; border-radius: 12px; display: flex; align-items: center; justify-content: center; user-select: none; -webkit-user-select: none; cursor: pointer; transition: all 0.2s; }
+    .peek-box.revealed { background: #ecf0f1; border-style: solid; border-color: #bdc3c7; }
+    .peek-box .card-text { font-size: 16px; color: #95a5a6; font-weight: 500; }
+    .peek-box.revealed .card-text { font-size: 28px; color: #c0392b; font-weight: bold; letter-spacing: 8px; }
+    .action-panel { background: #2c3e50; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .btn-group { display: flex; gap: 10px; }
+    button { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; color: white; }
+    .btn-fold { background: #7f8c8d; }
+    .btn-call { background: #2980b9; }
+    .btn-raise { background: #27ae60; }
+    .btn-start { background: #e67e22; width: 100%; margin-top: 8px; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #login-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 99; }
+    .modal-content { background: #2c3e50; width: 100%; max-width: 300px; padding: 24px; border-radius: 12px; display: flex; flex-direction: column; gap: 14px; }
+    .modal-content input { padding: 10px; border-radius: 6px; border: 1px solid #7f8c8d; background: #34495e; color: white; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <div id="login-modal">
+    <div class="modal-content">
+      <h3 style="text-align: center;">加入牌局</h3>
+      <input type="text" id="input-room" placeholder="房间号 (如 8821)" maxlength="6" />
+      <input type="text" id="input-name" placeholder="你的昵称" maxlength="8" />
+      <button class="btn-raise" onclick="joinRoom()">进入房间</button>
+    </div>
+  </div>
+
+  <header>
+    <div>房间号: <span id="room-label">-</span></div>
+    <div>阶段: <span class="badge" id="phase-label">等待开始</span></div>
+  </header>
+
+  <div class="players-list" id="players-box"></div>
+
+  <div class="table-area">
+    <div class="pot-display">底池: <span id="pot-amount">0</span></div>
+    <div class="community-cards" id="community-box">
+      <div class="card" style="opacity: 0.2;">?</div>
+      <div class="card" style="opacity: 0.2;">?</div>
+      <div class="card" style="opacity: 0.2;">?</div>
+      <div class="card" style="opacity: 0.2;">?</div>
+      <div class="card" style="opacity: 0.2;">?</div>
+    </div>
+  </div>
+
+  <div class="hand-container">
+    <div style="font-size: 12px; margin-bottom: 6px; color: #bdc3c7;">
+      我的筹码: <b id="my-chips" style="color: #f39c12; font-size: 16px;">1000</b>
+    </div>
+    <div class="peek-box" id="peek-btn">
+      <div class="card-text" id="peek-text">按住查看底牌 (防偷窥)</div>
+    </div>
+  </div>
+
+  <div class="action-panel">
+    <div class="btn-group">
+      <button class="btn-fold" id="btn-fold" onclick="sendAction('fold')" disabled>弃牌</button>
+      <button class="btn-call" id="btn-call" onclick="sendAction('call')" disabled>跟注</button>
+      <button class="btn-raise" id="btn-raise" onclick="promptRaise()" disabled>加注</button>
+    </div>
+    <button class="btn-start" id="btn-start" onclick="startGame()">发牌 / 新一局</button>
+  </div>
+
+  <script>
+    let ws;
+    let myCards = [];
+    let isMyTurn = false;
+    let currentMaxBet = 0;
+    let currentBet = 0;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomFromUrl = urlParams.get('room');
+    if (roomFromUrl) document.getElementById('input-room').value = roomFromUrl;
+
+    function joinRoom() {
+      const room = document.getElementById('input-room').value.trim();
+      const name = document.getElementById('input-name').value.trim();
+      if (!room || !name) return alert('请填写完整房间号和昵称');
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${protocol}//${window.location.host}`);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'JOIN_ROOM', roomId: room, name }));
+        document.getElementById('login-modal').style.display = 'none';
+        document.getElementById('room-label').innerText = room;
+        window.history.pushState({}, '', `?room=${room}`);
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'GAME_STATE') renderGame(msg);
+      };
+    }
+
+    function renderGame(state) {
+      document.getElementById('pot-amount').innerText = state.pot;
+      document.getElementById('phase-label').innerText = state.phase;
+      document.getElementById('my-chips').innerText = state.self.chips;
+
+      myCards = state.self.cards || [];
+      isMyTurn = state.self.isTurn;
+      currentMaxBet = state.currentMaxBet;
+      currentBet = state.self.currentBet;
+
+      const box = document.getElementById('players-box');
+      box.innerHTML = '';
+      state.players.forEach(p => {
+        const tag = document.createElement('div');
+        tag.className = `player-tag ${p.id === state.currentTurnPlayerId ? 'active' : ''}`;
+        tag.innerText = `${p.name} (${p.chips}) ${p.folded ? '[弃]' : ''}`;
+        box.appendChild(tag);
+      });
+
+      const cBox = document.getElementById('community-box');
+      if (state.communityCards.length > 0) {
+        cBox.innerHTML = '';
+        state.communityCards.forEach(card => {
+          const div = document.createElement('div');
+          div.className = 'card';
+          div.innerText = card;
+          if (card.includes('♥') || card.includes('♦')) div.style.color = '#e74c3c';
+          cBox.appendChild(div);
+        });
+      }
+
+      document.getElementById('btn-fold').disabled = !isMyTurn;
+      document.getElementById('btn-call').disabled = !isMyTurn;
+      document.getElementById('btn-raise').disabled = !isMyTurn;
+
+      const callDiff = currentMaxBet - currentBet;
+      document.getElementById('btn-call').innerText = callDiff > 0 ? `跟注 ${callDiff}` : '过牌';
+    }
+
+    const peekBtn = document.getElementById('peek-btn');
+    const peekText = document.getElementById('peek-text');
+
+    function reveal() {
+      if (myCards.length > 0) {
+        peekBtn.classList.add('revealed');
+        peekText.innerText = myCards.join('  ');
+      }
+    }
+    function conceal() {
+      peekBtn.classList.remove('revealed');
+      peekText.innerText = '按住查看底牌 (防偷窥)';
+    }
+
+    peekBtn.addEventListener('touchstart', (e) => { e.preventDefault(); reveal(); });
+    peekBtn.addEventListener('touchend', conceal);
+    peekBtn.addEventListener('mousedown', reveal);
+    peekBtn.addEventListener('mouseup', conceal);
+    peekBtn.addEventListener('mouseleave', conceal);
+
+    function startGame() {
+      ws.send(JSON.stringify({ type: 'START_GAME' }));
+    }
+
+    function sendAction(action, amount = 0) {
+      ws.send(JSON.stringify({ type: 'ACTION', action, amount }));
+    }
+
+    function promptRaise() {
+      const minRaise = currentMaxBet > 0 ? currentMaxBet * 2 : 20;
+      const amount = prompt(`请输入加注总额 (最低 ${minRaise}):`, minRaise);
+      if (amount && !isNaN(amount)) {
+        sendAction('raise', Number(amount));
+      }
+    }
+  </script>
+</body>
+</html>
